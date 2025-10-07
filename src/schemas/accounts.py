@@ -20,5 +20,13 @@ class UserRegistrationRequestSchema(BaseModel):
         return accounts_validators.validate_password_strength(v)
 
 
-class MessageResponseSchema(BaseModel):
+class DetailResponseSchema(BaseModel):
     detail: str
+
+
+class UserActivationRequestSchema(BaseModel):
+    email: EmailStr
+    token: str
+
+class MessageResponseSchema(BaseModel):
+    message: str
