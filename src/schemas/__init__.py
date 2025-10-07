@@ -12,7 +12,7 @@ from schemas.accounts import (
     UserActivationRequestSchema,
     MessageResponseSchema,
     PasswordResetRequestSchema,
-    # PasswordResetCompleteRequestSchema,
+    PasswordResetCompleteRequestSchema,
     # UserLoginResponseSchema,
     # UserLoginRequestSchema,
     # TokenRefreshRequestSchema,
