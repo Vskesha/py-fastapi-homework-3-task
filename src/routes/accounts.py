@@ -3,9 +3,8 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, delete
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 
 from config import get_jwt_auth_manager, get_settings, BaseAppSettings
 from database import (
@@ -17,10 +16,19 @@ from database import (
     PasswordResetTokenModel,
     RefreshTokenModel
 )
-from exceptions import BaseSecurityError
-from schemas import UserRegistrationResponseSchema, DetailResponseSchema, UserRegistrationRequestSchema, \
-    MessageResponseSchema, UserActivationRequestSchema, PasswordResetRequestSchema, PasswordResetCompleteRequestSchema, \
-    UserLoginResponseSchema, UserLoginRequestSchema
+from schemas import (
+    UserRegistrationRequestSchema,
+    UserRegistrationResponseSchema,
+    DetailResponseSchema,
+    UserActivationRequestSchema,
+    MessageResponseSchema,
+    PasswordResetRequestSchema,
+    PasswordResetCompleteRequestSchema,
+    UserLoginResponseSchema,
+    UserLoginRequestSchema,
+    TokenRefreshRequestSchema,
+    TokenRefreshResponseSchema,
+)
 from security.interfaces import JWTAuthManagerInterface
 
 router = APIRouter()
@@ -138,9 +146,9 @@ async def activate_user(
 
     user.is_active = True
     await db.execute(
-            delete(ActivationTokenModel)
-            .where(ActivationTokenModel.id == user.activation_token.id)
-        )
+        delete(ActivationTokenModel)
+        .where(ActivationTokenModel.id == user.activation_token.id)
+    )
     await db.commit()
 
     return MessageResponseSchema(
@@ -325,6 +333,82 @@ async def login_user(
         raise
     except Exception:
         await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing the request."
+        )
+
+
+@router.post(
+    "/refresh/",
+    response_model=TokenRefreshResponseSchema,
+    responses={
+        400: {
+            "model": DetailResponseSchema,
+            "description": "Token has expired.",
+        },
+        401: {
+            "model": DetailResponseSchema,
+            "description": "Refresh token not found.",
+        },
+        404: {
+            "model": DetailResponseSchema,
+            "description": "User not found.",
+        },
+    }
+)
+async def refresh_access_token(
+        data: TokenRefreshRequestSchema,
+        db: AsyncSession = Depends(get_db),
+        jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager)
+):
+    try:
+        try:
+            token_data = jwt_manager.decode_refresh_token(data.refresh_token)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token has expired."
+            )
+
+        user_id = token_data.get("user_id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token has expired."
+            )
+
+        stmt = select(RefreshTokenModel).where(
+            RefreshTokenModel.token == data.refresh_token
+        )
+        result = await db.execute(stmt)
+        refresh_token_record = result.scalars().first()
+
+        if not refresh_token_record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token not found."
+            )
+
+        stmt = select(UserModel).where(UserModel.id == user_id)
+        result = await db.execute(stmt)
+        user = result.scalars().first()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found."
+            )
+
+        access_token = jwt_manager.create_access_token({"user_id": user.id})
+
+        return TokenRefreshResponseSchema(
+            access_token=access_token
+        )
+
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing the request."
