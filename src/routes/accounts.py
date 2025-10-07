@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import cast
 
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,8 @@ from database import (
 )
 from exceptions import BaseSecurityError
 from schemas import UserRegistrationResponseSchema, DetailResponseSchema, UserRegistrationRequestSchema, \
-    MessageResponseSchema, UserActivationRequestSchema, PasswordResetRequestSchema, PasswordResetCompleteRequestSchema
+    MessageResponseSchema, UserActivationRequestSchema, PasswordResetRequestSchema, PasswordResetCompleteRequestSchema, \
+    UserLoginResponseSchema, UserLoginRequestSchema
 from security.interfaces import JWTAuthManagerInterface
 
 router = APIRouter()
@@ -28,7 +29,7 @@ router = APIRouter()
 @router.post(
     "/register/",
     response_model=UserRegistrationResponseSchema,
-    status_code=201,
+    status_code=status.HTTP_201_CREATED,
     responses={
         409: {
             "model": DetailResponseSchema,
@@ -48,7 +49,7 @@ async def register_user(
         existing_user = await db.scalar(select(UserModel).where(UserModel.email == user_data.email))
         if existing_user:
             raise HTTPException(
-                status_code=409,
+                status_code=status.HTTP_409_CONFLICT,
                 detail=f"A user with this email {user_data.email} already exists."
             )
 
@@ -101,13 +102,13 @@ async def activate_user(
 
     if not user:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired activation token."
         )
 
     if user.is_active:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="User account is already active."
         )
 
@@ -116,7 +117,7 @@ async def activate_user(
             or user.activation_token.token != data.token
     ):
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired activation token."
         )
 
@@ -157,7 +158,6 @@ async def request_password_reset(
 ):
     user = await db.scalar(
         select(UserModel)
-        .options(joinedload(UserModel.activation_token))
         .where(UserModel.email == data.email)
     )
 
@@ -197,7 +197,6 @@ async def complete_password_reset(
     try:
         user = await db.scalar(
             select(UserModel)
-            .options(joinedload(UserModel.activation_token))
             .where(UserModel.email == data.email)
         )
 
@@ -261,3 +260,72 @@ async def complete_password_reset(
             detail="An error occurred while resetting the password."
         )
 
+
+@router.post(
+    "/login/",
+    response_model=UserLoginResponseSchema,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        401: {
+            "model": DetailResponseSchema,
+            "description": "Invalid email or password.",
+        },
+        403: {
+            "model": DetailResponseSchema,
+            "description": "User account is not activated.",
+        },
+        500: {
+            "model": DetailResponseSchema,
+            "description": "An error occurred while processing the request.",
+        },
+    }
+)
+async def login_user(
+        data: UserLoginRequestSchema,
+        db: AsyncSession = Depends(get_db),
+        jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+        settings: BaseAppSettings = Depends(get_settings)
+):
+    try:
+        user = await db.scalar(
+            select(UserModel)
+            .where(UserModel.email == data.email)
+        )
+
+        if not user or not user.verify_password(data.password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password."
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is not activated."
+            )
+
+        access_token = jwt_manager.create_access_token({"user_id": user.id})
+        refresh_token = jwt_manager.create_refresh_token({"user_id": user.id})
+
+        refresh_token_record = RefreshTokenModel.create(
+            user_id=user.id,
+            days_valid=settings.LOGIN_TIME_DAYS,
+            token=refresh_token
+        )
+        db.add(refresh_token_record)
+        await db.commit()
+
+        return UserLoginResponseSchema(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer"
+        )
+
+    except HTTPException:
+        raise
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing the request."
+        )
