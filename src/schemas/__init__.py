@@ -8,12 +8,12 @@ from schemas.movies import (
 from schemas.accounts import (
     UserRegistrationRequestSchema,
     UserRegistrationResponseSchema,
-    UserActivationRequestSchema,
+    # UserActivationRequestSchema,
     MessageResponseSchema,
-    PasswordResetRequestSchema,
-    PasswordResetCompleteRequestSchema,
-    UserLoginResponseSchema,
-    UserLoginRequestSchema,
-    TokenRefreshRequestSchema,
-    TokenRefreshResponseSchema
+    # PasswordResetRequestSchema,
+    # PasswordResetCompleteRequestSchema,
+    # UserLoginResponseSchema,
+    # UserLoginRequestSchema,
+    # TokenRefreshRequestSchema,
+    # TokenRefreshResponseSchema
 )
