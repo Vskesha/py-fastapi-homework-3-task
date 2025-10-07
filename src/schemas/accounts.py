@@ -28,5 +28,10 @@ class UserActivationRequestSchema(BaseModel):
     email: EmailStr
     token: str
 
+
 class MessageResponseSchema(BaseModel):
     message: str
+
+
+class PasswordResetRequestSchema(BaseModel):
+    email: EmailStr

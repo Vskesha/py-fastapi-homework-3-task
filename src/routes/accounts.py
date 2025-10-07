@@ -19,7 +19,7 @@ from database import (
 )
 from exceptions import BaseSecurityError
 from schemas import UserRegistrationResponseSchema, DetailResponseSchema, UserRegistrationRequestSchema, \
-    MessageResponseSchema, UserActivationRequestSchema
+    MessageResponseSchema, UserActivationRequestSchema, PasswordResetRequestSchema
 from security.interfaces import JWTAuthManagerInterface
 
 router = APIRouter()
@@ -144,4 +144,30 @@ async def activate_user(
 
     return MessageResponseSchema(
         message="User account activated successfully."
+    )
+
+
+@router.post("/password-reset/request/", response_model=MessageResponseSchema)
+async def request_password_reset(
+        data: PasswordResetRequestSchema,
+        db: AsyncSession = Depends(get_db)
+):
+    user = await db.scalar(
+        select(UserModel)
+        .options(joinedload(UserModel.activation_token))
+        .where(UserModel.email == data.email)
+    )
+
+    if user and user.is_active:
+        await db.execute(
+            delete(PasswordResetTokenModel)
+            .where(PasswordResetTokenModel.user_id == user.id)
+        )
+
+        reset_token = PasswordResetTokenModel(user_id=user.id)
+        db.add(reset_token)
+        await db.commit()
+
+    return MessageResponseSchema(
+        message="If you are registered, you will receive an email with instructions."
     )
